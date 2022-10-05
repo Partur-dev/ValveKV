@@ -1,82 +1,186 @@
-/**
- * TS implementation of Valve Key Value
- * For kafif
- */
-export class ValveKV {
-  static parse = (code: string): Record<string, unknown> => {
-    const result: Record<string, unknown> = {};
-    let current = result;
-    let isString = false;
-    let isKey = true;
-    let tmp = '';
-    let comment = 0;
+type AnyObject = Record<string, unknown>;
 
-    for (const char of code.split('')) {
-      if (char == '/') {
-        comment = comment == 0 ? 1 : 2;
-      }
+enum TokenType {
+  BlockStart,
+  BlockEnd,
+  String,
+}
 
-      if (comment == 2) {
-        if (char == '\n') {
-          comment = 0;
-        }
+interface Token {
+  type: TokenType;
+  data?: string;
+}
 
-        continue;
-      }
+class Tokenizer {
+  private _code: string;
+  private _position: number;
 
-      if (char == '"') {
-        if (isString) {
-          isString = false;
+  public constructor(code: string) {
+    this._code = code;
+    this._position = 0;
+  }
 
-          if (isKey) {
-            current[tmp] = undefined;
-            isKey = false;
-          } else {
-            current[Object.keys(current).at(-1)!] = tmp;
-            isKey = true;
-          }
+  public nextToken(): Token {
+    this._ignoreWhitespace();
+    this._ignoreComment();
 
-          tmp = '';
-        } else {
-          isString = true;
-        }
+    const current = this._current();
 
-        continue;
-      }
-
-      if (char == '{') {
-        isKey = true;
-        const newCurrent = {};
-        current[Object.keys(current).at(-1)!] = newCurrent;
-        current = newCurrent;
-      }
-
-      if (isString) {
-        tmp += char;
-      }
+    if (current === '{') {
+      this._move();
+      return { type: TokenType.BlockStart };
+    } else if (current === '}') {
+      this._move();
+      return { type: TokenType.BlockEnd };
+    } else {
+      const data = this._getString();
+      return { type: TokenType.String, data };
     }
+  }
 
-    return result;
-  };
-
-  static stringify(obj: Record<string, unknown>, tabLevel = 0): string {
+  private _getString(): string {
     let result = '';
-    const tabs = '\t'.repeat(tabLevel);
+    let quoted = false;
 
-    for (const [key, value] of Object.entries(obj)) {
-      result += `${tabs}"${key}" `;
-      if (typeof value === 'string') {
-        result += `"${value}"\n`;
-      } else {
-        result += '{\n';
-        result += this.stringify(
-          value as Record<string, unknown>,
-          tabLevel + 1,
-        );
-        result += `${tabs}}\n`;
+    if (this._current() === '"') {
+      quoted = true;
+      this._move();
+    }
+
+    while (true) {
+      if (!quoted && ['{', '}'].includes(this._current())) {
+        break;
       }
+
+      if (quoted && this._current() === '"') {
+        break;
+      }
+
+      result += this._current();
+
+      this._move();
+    }
+
+    if (quoted) {
+      this._move();
     }
 
     return result;
+  }
+
+  private _ignoreWhitespace(): void {
+    while (['\t', '\n', ' '].includes(this._current())) {
+      this._move();
+    }
+  }
+
+  private _ignoreComment(): void {
+    if (this._current() === '/' && this._next() === '/') {
+      while (this._current() !== '\n') {
+        this._move();
+      }
+    }
+  }
+
+  private _current(): string {
+    if (this._position >= this._code.length) {
+      throw new Error('position > code.length');
+    }
+
+    return this._code.at(this._position)!;
+  }
+
+  private _next(): string {
+    if (this._position + 1 >= this._code.length) {
+      throw new Error('position + 1 > code.length');
+    }
+
+    return this._code.at(this._position)!;
+  }
+
+  private _move() {
+    if (this._position + 1 >= this._code.length) {
+      throw new Error('position + 1 > code.length');
+    }
+
+    this._position += 1;
+  }
+}
+
+const _parse = (tokenizer: Tokenizer): AnyObject => {
+  const result: AnyObject = {};
+  let key: string | undefined = undefined;
+
+  while (true) {
+    const token = tokenizer.nextToken();
+
+    if (typeof key !== 'undefined') {
+      if (token.type === TokenType.BlockStart) {
+        const value = _parse(tokenizer);
+        if (typeof result[key] === 'object') {
+          result[key] = { ...result[key] as AnyObject, ...value };
+        } else {
+          result[key] = value;
+        }
+      } else if (token.type === TokenType.String) {
+        result[key] = token.data;
+      }
+
+      key = undefined;
+    } else {
+      if (token.type === TokenType.BlockEnd) {
+        break;
+      }
+
+      key = token.data;
+    }
+  }
+
+  return result;
+};
+
+const _stringify = (
+  obj: AnyObject,
+  indent: boolean,
+  tabSize: number,
+): string => {
+  let result = '';
+  const tab = indent ? '  '.repeat(tabSize) : '';
+  const eof = indent ? '\n' : '';
+  const space = indent ? ' ' : '';
+
+  for (const [key, value] of Object.entries(obj)) {
+    result += `${tab}"${key}"${space}`;
+    if (typeof value === 'string') {
+      result += `"${value}"${eof}`;
+    } else {
+      const next = _stringify(value as AnyObject, indent, tabSize + 1)
+        .trimEnd();
+      result += `{${eof}${next}${eof}${tab}}${eof}`;
+    }
+  }
+
+  return result;
+};
+
+export class ValveKV {
+  public static parse(code: string): AnyObject {
+    if (typeof code !== 'string') {
+      throw new Error('code is not a string');
+    }
+
+    const result: AnyObject = {};
+    const tokenizer = new Tokenizer(code + '\n');
+
+    const key = tokenizer.nextToken();
+    tokenizer.nextToken();
+
+    result[key.data!] = _parse(tokenizer);
+
+    return result;
+  }
+
+  public static stringify(obj: AnyObject, indent = false): string {
+    return _stringify(obj, indent, 0);
   }
 }
