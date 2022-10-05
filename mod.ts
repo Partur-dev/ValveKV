@@ -21,8 +21,12 @@ class Tokenizer {
   }
 
   public nextToken(): Token {
-    this._ignoreWhitespace();
-    this._ignoreComment();
+    while (true) {
+      this._ignoreWhitespace();
+      if (!this._ignoreComment()) {
+        break;
+      }
+    }
 
     const current = this._current();
 
@@ -69,17 +73,21 @@ class Tokenizer {
   }
 
   private _ignoreWhitespace(): void {
+    // console.log('----\n', this._code.slice(this._position));
+
     while (['\t', '\n', ' '].includes(this._current())) {
       this._move();
     }
   }
 
-  private _ignoreComment(): void {
+  private _ignoreComment(): boolean {
     if (this._current() === '/' && this._next() === '/') {
       while (this._current() !== '\n') {
         this._move();
       }
+      return true;
     }
+    return false;
   }
 
   private _current(): string {
