@@ -159,12 +159,12 @@ const _stringify = (
 
   for (const [key, value] of Object.entries(obj)) {
     result += `${tab}"${key}"${space}`;
-    if (typeof value === 'string') {
-      result += `"${value}"${eof}`;
-    } else {
+    if (typeof value === 'object') {
       const next = _stringify(value as AnyObject, indent, tabSize + 1)
         .trimEnd();
       result += `{${eof}${next}${eof}${tab}}${eof}`;
+    } else {
+      result += `"${value.toString()}"${eof}`;
     }
   }
 
